@@ -179,7 +179,7 @@ def _worker_loop(
             reporter.on_step_progress(job, desc)
 
         conclusion, log_text = executor.run_workflow(
-            workspace.workflow_dir_for_pr(pr_info),
+            workspace.ensure_workflow_for_build(pr_info, cfg.target_branch),
             cfg.step_timeout,
             _progress_cb,
         )

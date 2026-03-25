@@ -8,6 +8,15 @@
 #   • repo 多仓：放在「当前 PR 所在子仓库」根目录下的 .riscv/workflow.yml（推荐）；
 #     也可放在 WORKSPACE_DIR 根目录作为所有子仓共用（Runner 会优先子仓）。
 # Runner 会依次执行 steps 中的每条 run 命令，任一步骤非零退出码即失败。
+#
+# ── 关于 sudo apt / 系统包 ─────────────────────────────────────────────
+# 子进程无 TTY，sudo 若需密码会报错：sudo: A terminal is required to authenticate
+# • 不要把 root 密码或 sudo 密码写进仓库或 .env（严重安全隐患）。
+# • 推荐（择一）：
+#   1) 在 Runner 机器上预装构建依赖（镜像/装机脚本一次装好）；
+#   2) 为「仅跑 CI 的 Linux 用户」配置免密 sudo（sudoers 里只允许 apt 等少数命令）；
+#   3) 仅用用户态安装：pip/pnpm --prefix、解压便携工具链等，避免 sudo。
+# 若已配置免密 sudo，可在下面步骤中自行写 sudo apt-get install …。
 
 steps:
   - name: 检查环境
@@ -16,10 +25,10 @@ steps:
       git log --oneline -3
       uname -a
 
-  - name: 安装依赖
+  - name: 检查构建工具（假定已在机器上预装）
     run: |
-      sudo apt-get update -q
-      sudo apt-get install -y build-essential cmake ninja-build
+      command -v cmake || { echo "缺少 cmake，请在 Runner 上预装或配置免密 sudo 后安装"; exit 1; }
+      command -v ninja || { echo "缺少 ninja，同上"; exit 1; }
 
   - name: 清理上次产物
     run: |

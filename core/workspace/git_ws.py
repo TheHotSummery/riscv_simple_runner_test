@@ -8,6 +8,7 @@ from urllib.parse import quote
 
 from core.config import normalize_github_repo_slug
 from core.workspace import PRInfo, WorkspaceBase
+from core.workspace.workflow_fallback import try_materialize_workflow_from_target_branch
 
 
 def _authed_clone_url(repo: str, token: str) -> str:
@@ -75,3 +76,17 @@ class GitWorkspace(WorkspaceBase):
 
     def workflow_dir(self) -> str:
         return self._workspace_dir
+
+    def ensure_workflow_for_build(self, pr: PRInfo, target_branch: str) -> str:
+        d = self.workflow_dir_for_pr(pr)
+        wf = os.path.join(d, ".riscv", "workflow.yml")
+        if os.path.isfile(wf):
+            return d
+        if try_materialize_workflow_from_target_branch(d, target_branch):
+            if os.path.isfile(wf):
+                print(
+                    f"[Info] PR 分支缺少 .riscv/workflow.yml，已从 origin/{target_branch} 检出",
+                    flush=True,
+                )
+                return d
+        return d

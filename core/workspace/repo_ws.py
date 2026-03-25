@@ -11,6 +11,7 @@ from urllib.parse import quote
 
 from core.config import normalize_github_repo_slug
 from core.workspace import PRInfo, WorkspaceBase
+from core.workspace.workflow_fallback import try_materialize_workflow_from_target_branch
 
 
 def _authed_url(repo: str, token: str) -> str:
@@ -172,6 +173,35 @@ class RepoWorkspace(WorkspaceBase):
             return root
         # 未找到文件时，让 executor 报错路径指向最可能的位置（通常应先补子仓内 workflow）
         return os.path.join(root, sub) if sub else root
+
+    def ensure_workflow_for_build(self, pr: PRInfo, target_branch: str) -> str:
+        """
+        若 PR 分支（当前 HEAD）无 .riscv/workflow.yml，则从 origin/<target_branch>
+        仅检出该文件到子仓库，其余文件仍为 PR 的 head_sha。
+        """
+        wf_dir = self.workflow_dir_for_pr(pr)
+        wf_path = os.path.join(wf_dir, ".riscv", "workflow.yml")
+        if os.path.isfile(wf_path):
+            return wf_dir
+        sub = self._find_sub_path(pr.repo)
+        if sub:
+            abs_sub = os.path.join(self._workspace_dir, sub)
+            if try_materialize_workflow_from_target_branch(abs_sub, target_branch):
+                if os.path.isfile(wf_path):
+                    print(
+                        f"[Info] PR 分支缺少 .riscv/workflow.yml，已从 origin/{target_branch} 检出",
+                        flush=True,
+                    )
+                    return wf_dir
+        root = self.workflow_dir()
+        root_wf = os.path.join(root, ".riscv", "workflow.yml")
+        if os.path.isfile(root_wf):
+            print(
+                "[Info] 使用工作区根目录下的 .riscv/workflow.yml（子仓内仍无该文件）",
+                flush=True,
+            )
+            return root
+        return wf_dir
 
     # ── 公共工具方法 ──────────────────────────────────────────────────────
 

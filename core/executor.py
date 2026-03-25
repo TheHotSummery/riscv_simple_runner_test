@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import yaml
@@ -12,6 +13,28 @@ import queue
 import time
 
 WORKFLOW_REL = os.path.join(".riscv", "workflow.yml")
+
+# 匹配 shell 脚本中的 sudo（词边界，避免误伤不含独立 sudo 的字符串）
+_SUDO_PATTERN = re.compile(r"\bsudo\b")
+
+
+def _skip_sudo_steps_enabled() -> bool:
+    v = os.environ.get("SKIP_SUDO_STEPS", "true").strip().lower()
+    return v not in ("false", "0", "no", "off")
+
+
+def _sudo_skip_log_block(run_cmd: str) -> str:
+    return (
+        "[Sudo] 检测到本步骤的 run 中包含 sudo。\n"
+        "在无交互终端的自托管 Runner 上，sudo 通常无法输入密码而失败（A terminal is required to authenticate）。\n"
+        "已根据环境变量 SKIP_SUDO_STEPS（默认启用）跳过本步骤的实际执行，本步骤计为成功。\n"
+        "建议：在 Runner 机器上预装依赖，或为 CI 用户配置免密 sudo（见 DEPLOY.md）；勿在仓库中保存密码。\n"
+        "若需强制执行含 sudo 的步骤，可设置 SKIP_SUDO_STEPS=false（风险自负）。\n"
+        "若后续步骤依赖本步安装的软件包，可能会失败。\n"
+        "—— 以下为未执行的命令 ——\n"
+        f"{run_cmd}\n"
+        "—— 结束 ——\n"
+    )
 
 
 def _merge_streams(stdout: str | None, stderr: str | None) -> str:
@@ -117,7 +140,8 @@ def run_workflow(
     progress_cb: Optional[Callable[[str, int, int, str], None]] = None,
 ) -> tuple[str, str]:
     """
-    读取 workspace 内 .github/workflows/riscv-ci.yml，顺序执行 steps。
+    读取 workspace 内 .riscv/workflow.yml，顺序执行 steps。
+    若某步 run 中含 sudo 且 SKIP_SUDO_STEPS 为真（默认），则跳过该步执行并写入说明日志，该步视为成功。
     返回 (conclusion, total_log_text)，conclusion 为 success 或 failure。
     """
     path = os.path.join(workspace_dir, WORKFLOW_REL)
@@ -157,6 +181,14 @@ def run_workflow(
         if not isinstance(run_cmd, str) or not run_cmd.strip():
             logs.append("错误: 缺少有效的 run 字段。\n")
             return "failure", "".join(logs)
+
+        if _skip_sudo_steps_enabled() and _SUDO_PATTERN.search(run_cmd):
+            skip_msg = _sudo_skip_log_block(run_cmd)
+            logs.append(skip_msg)
+            print(skip_msg, flush=True)
+            if progress_cb is not None:
+                progress_cb("done", i + 1, total_steps, step_name)
+            continue
 
         try:
             code, merged = _run_step_shell(run_cmd, workspace_dir, step_timeout_sec)

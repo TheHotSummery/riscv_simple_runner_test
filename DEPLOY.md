@@ -14,7 +14,7 @@
 2. **单仓库（默认）**：`GITHUB_TOKEN`、`GITHUB_REPO`、`TARGET_BRANCH`；可选 `WORKSPACE_DIR`、`POLL_INTERVAL`、`STEP_TIMEOUT` 等。
 3. **repo 多仓模式**：设置 `WORKSPACE_MODE=repo`、`MANIFEST_REPO`、`TARGET_BRANCH`；`GITHUB_REPO` 可不填。`MANIFEST_REPO` 填 **`owner/repo`**（如 `TheHotSummery/manifest`），**不要**写成 `owner/repo.git`；程序会自动去掉误写的 `.git`，否则 clone 地址会变成 `…/repo.git.git` 而失败。`MANIFEST_FILE` 须与 manifest 仓库里实际 XML 文件名一致（如 `default.xml` 或 `spacemit.xml`）。`WATCH_REPOS` 留空时，首次 `repo sync` 后会从 manifest 解析出所有子仓库并轮询 PR。
 4. **`MANIFEST_GITHUB_ORG`（可选）**：manifest 里 `<remote fetch="../某组织">` 这类相对路径时，程序会推断 GitHub `owner` 以拼出 `owner/repo`。若推断不准，可显式设置，例如 `MANIFEST_GITHUB_ORG=spacemit-robotics`。
-5. **工作流文件**：Runner 读取 `.riscv/workflow.yml`（勿放在 `.github/workflows/`，以免被 GitHub Actions 误解析）。**单仓模式**：路径为 clone 根下的 `.riscv/workflow.yml`。**repo 多仓模式**：**优先**使用「当前 PR 所在子仓库」目录下的 `.riscv/workflow.yml`（与各子仓库 GitHub 上 main/PR 分支一致）；若子仓没有，再尝试 `WORKSPACE_DIR` 根目录下的同路径（共用一份）。因此贡献者需在**对应子仓库**里提交该文件（或依赖根目录共用文件）。
+5. **工作流文件**：Runner 读取 `.riscv/workflow.yml`（勿放在 `.github/workflows/`，以免被 GitHub Actions 误解析）。**单仓模式**：路径为 clone 根下的 `.riscv/workflow.yml`。**repo 多仓模式**：**优先**使用「当前 PR 所在子仓库」下的该文件；若子仓没有，再尝试 `WORKSPACE_DIR` 根目录（共用）。若 **PR 分支没有**该文件而 **`TARGET_BRANCH`（如 main）上有**，Runner 会在 `sync_for_pr` 之后从 `origin/<TARGET_BRANCH>` **单独检出** `.riscv/workflow.yml`，其余代码仍为 PR 的 `head_sha`。请保证 `.env` 里 `TARGET_BRANCH` 与 PR 的 **base 分支**一致。
 6. **注意**：systemd 的 `EnvironmentFile` 要求 `KEY=value` 一行一项，**不要**写 `export`。
 
 ### 单仓库示例
@@ -73,6 +73,23 @@ python3 -m core.main
 ```
 
 或使用 `./run.sh`（需已 `export` 环境变量或配合 `env` 注入）。
+
+## 工作流里的 `sudo apt`（自托管常见）
+
+Runner 执行 `run` 时**无交互终端**，`sudo` 若需输入密码会失败（`A terminal is required to authenticate`）。
+
+- **不要把密码写进仓库或 `.env`**。
+- **推荐**：在板子/Runner 上**事先装好**编译依赖（`apt` 一次装好，或由镜像提供）。
+- **可选**：为运行服务的用户配置 **免密 sudo**（仅允许必要命令），例如：
+
+```text
+# /etc/sudoers.d/riscv-runner（用 visudo 编辑）
+bianbu ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt
+```
+
+路径以 `which apt-get` 为准；范围尽量收窄。
+
+程序默认还会对工作流里 **含 `sudo` 的步骤** 做检测：若环境变量 **`SKIP_SUDO_STEPS`** 为真（默认），则**不执行**该步 shell，仅在日志中说明原因（避免无 TTY 时 sudo 直接失败）。需要强制执行时请设 `SKIP_SUDO_STEPS=false` 并自行保证免密 sudo 等。
 
 ## repo 模式：工作区损坏时
 

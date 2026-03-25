@@ -64,3 +64,11 @@ class WorkspaceBase(ABC):
         多仓模式：优先使用「该 PR 所在子仓库」内的 .riscv/workflow.yml（见 RepoWorkspace）。
         """
         return self.workflow_dir()
+
+    def ensure_workflow_for_build(self, pr: PRInfo, target_branch: str) -> str:
+        """
+        在 sync_for_pr 之后调用：确定最终用于执行 steps 的目录。
+        若 PR 分支缺少 .riscv/workflow.yml，子类可从 origin/<target_branch> 单独检出该文件。
+        默认实现：与 workflow_dir_for_pr 相同。
+        """
+        return self.workflow_dir_for_pr(pr)
