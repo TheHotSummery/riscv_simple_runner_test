@@ -96,7 +96,7 @@ def _tick() -> None:
     pr_number, sha = next_pr
     print(f"[Info] 处理 PR #{pr_number} head={sha}", flush=True)
 
-    check_run_id = github_api.create_check_run(sha)
+    github_api.create_commit_status(sha)
 
     cfg = load_config()
     try:
@@ -109,19 +109,19 @@ def _tick() -> None:
     except (OSError, RuntimeError) as e:
         log = f"Git 同步失败: {e}\n"
         try:
-            github_api.update_check_run(check_run_id, "failure", log)
+            github_api.update_commit_status(sha, "failure")
         except requests.RequestException as ex:
-            print(f"更新 Check Run 失败: {ex}", file=sys.stderr)
+            print(f"更新 Commit Status 失败: {ex}", file=sys.stderr)
         return
 
-    conclusion, log_text = executor.run_workflow(
+    conclusion, _log_text = executor.run_workflow(
         cfg.workspace_dir,
         cfg.step_timeout,
     )
     try:
-        github_api.update_check_run(check_run_id, conclusion, log_text)
+        github_api.update_commit_status(sha, conclusion)
     except requests.RequestException as e:
-        print(f"更新 Check Run 失败: {e}", file=sys.stderr)
+        print(f"更新 Commit Status 失败: {e}", file=sys.stderr)
 
     state = read_pr_state()
     state[pr_number] = sha

@@ -1,4 +1,4 @@
-"""GitHub Commits API / Pull Requests API 与 Checks API（Check Runs）。"""
+"""GitHub Commits API / Pull Requests API 与 Commit Status API。"""
 
 from __future__ import annotations
 
@@ -7,10 +7,7 @@ import os
 import requests
 
 API_BASE = "https://api.github.com"
-CHECK_NAME = "RISC-V Native CI"
-LOG_TRUNCATE_MARKER = "\n...[Log Truncated by RiscvLiteRunner]...\n"
-LOG_MAX_CHARS = 60000
-GITHUB_OUTPUT_TEXT_MAX = 65535
+STATUS_CONTEXT = "RISC-V Native CI"
 
 
 def _github_headers() -> dict[str, str]:
@@ -90,48 +87,29 @@ def list_open_prs() -> list[dict[str, object]]:
     return prs
 
 
-def create_check_run(sha: str) -> int:
+def create_commit_status(sha: str) -> None:
     repo = os.environ["GITHUB_REPO"]
-    url = f"{API_BASE}/repos/{repo}/check-runs"
+    url = f"{API_BASE}/repos/{repo}/statuses/{sha}"
     body = {
-        "name": CHECK_NAME,
-        "head_sha": sha,
-        "status": "in_progress",
+        "state": "pending",
+        "context": STATUS_CONTEXT,
+        "description": "Build queued.",
     }
     r = requests.post(url, headers=_github_headers(), json=body, timeout=60)
     r.raise_for_status()
-    data = r.json()
-    cid = data.get("id")
-    if cid is None:
-        raise RuntimeError("check-runs 响应缺少 id 字段")
-    return int(cid)
 
 
-def _truncate_log_for_github(log_output: str) -> str:
-    if len(log_output) <= LOG_MAX_CHARS:
-        return log_output
-    return LOG_TRUNCATE_MARKER + log_output[-LOG_MAX_CHARS:]
-
-
-def update_check_run(check_run_id: int, conclusion: str, log_output: str) -> None:
+def update_commit_status(sha: str, conclusion: str) -> None:
     if conclusion not in ("success", "failure"):
         raise ValueError('conclusion 只能是 "success" 或 "failure"')
-    inner = _truncate_log_for_github(log_output)
-    text = f"```{inner}```"
-    if len(text) > GITHUB_OUTPUT_TEXT_MAX:
-        over = len(text) - GITHUB_OUTPUT_TEXT_MAX
-        inner = inner[over:]
-        text = f"```{inner}```"
+    state = "success" if conclusion == "success" else "failure"
+    desc = "Build succeeded." if state == "success" else "Build failed."
     repo = os.environ["GITHUB_REPO"]
-    url = f"{API_BASE}/repos/{repo}/check-runs/{check_run_id}"
+    url = f"{API_BASE}/repos/{repo}/statuses/{sha}"
     body = {
-        "status": "completed",
-        "conclusion": conclusion,
-        "output": {
-            "title": "Build Logs",
-            "summary": "Execution finished.",
-            "text": text,
-        },
+        "state": state,
+        "context": STATUS_CONTEXT,
+        "description": desc,
     }
-    r = requests.patch(url, headers=_github_headers(), json=body, timeout=120)
+    r = requests.post(url, headers=_github_headers(), json=body, timeout=60)
     r.raise_for_status()
