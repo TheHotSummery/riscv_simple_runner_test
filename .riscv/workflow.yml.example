@@ -3,8 +3,11 @@
 # ⚠️  此文件由 riscv-action-runner 读取，格式为自定义 YAML。
 #     请勿将此文件放入 .github/workflows/ 目录，否则 GitHub Actions 会尝试解析它并报错。
 #
-# 用法：将本文件复制为仓库根目录下的 .riscv/workflow.yml 并按需修改。
-# Runner 会依次执行 steps 列表中的每条 run 命令，任一步骤返回非零退出码即标记失败。
+# 用法：
+#   • 单仓库：放在该仓库根目录 .riscv/workflow.yml。
+#   • repo 多仓：放在「当前 PR 所在子仓库」根目录下的 .riscv/workflow.yml（推荐）；
+#     也可放在 WORKSPACE_DIR 根目录作为所有子仓共用（Runner 会优先子仓）。
+# Runner 会依次执行 steps 中的每条 run 命令，任一步骤非零退出码即失败。
 
 steps:
   - name: 检查环境

@@ -14,7 +14,7 @@
 2. **单仓库（默认）**：`GITHUB_TOKEN`、`GITHUB_REPO`、`TARGET_BRANCH`；可选 `WORKSPACE_DIR`、`POLL_INTERVAL`、`STEP_TIMEOUT` 等。
 3. **repo 多仓模式**：设置 `WORKSPACE_MODE=repo`、`MANIFEST_REPO`、`TARGET_BRANCH`；`GITHUB_REPO` 可不填。`MANIFEST_REPO` 填 **`owner/repo`**（如 `TheHotSummery/manifest`），**不要**写成 `owner/repo.git`；程序会自动去掉误写的 `.git`，否则 clone 地址会变成 `…/repo.git.git` 而失败。`MANIFEST_FILE` 须与 manifest 仓库里实际 XML 文件名一致（如 `default.xml` 或 `spacemit.xml`）。`WATCH_REPOS` 留空时，首次 `repo sync` 后会从 manifest 解析出所有子仓库并轮询 PR。
 4. **`MANIFEST_GITHUB_ORG`（可选）**：manifest 里 `<remote fetch="../某组织">` 这类相对路径时，程序会推断 GitHub `owner` 以拼出 `owner/repo`。若推断不准，可显式设置，例如 `MANIFEST_GITHUB_ORG=spacemit-robotics`。
-5. **工作流文件**：Runner 读取工作区根目录下的 `.riscv/workflow.yml`（勿放在 `.github/workflows/`，以免被 GitHub Actions 误解析）。多仓工作区请在 `WORKSPACE_DIR` 根目录单独放置或部署时拷贝该文件。
+5. **工作流文件**：Runner 读取 `.riscv/workflow.yml`（勿放在 `.github/workflows/`，以免被 GitHub Actions 误解析）。**单仓模式**：路径为 clone 根下的 `.riscv/workflow.yml`。**repo 多仓模式**：**优先**使用「当前 PR 所在子仓库」目录下的 `.riscv/workflow.yml`（与各子仓库 GitHub 上 main/PR 分支一致）；若子仓没有，再尝试 `WORKSPACE_DIR` 根目录下的同路径（共用一份）。因此贡献者需在**对应子仓库**里提交该文件（或依赖根目录共用文件）。
 6. **注意**：systemd 的 `EnvironmentFile` 要求 `KEY=value` 一行一项，**不要**写 `export`。
 
 ### 单仓库示例

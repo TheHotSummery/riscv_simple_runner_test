@@ -53,7 +53,14 @@ class WorkspaceBase(ABC):
     @abstractmethod
     def workflow_dir(self) -> str:
         """
-        返回 executor 读取 .riscv/workflow.yml 所用的根目录。
-        git 模式：workspace_dir 本身。
-        repo 模式：workspace_dir 本身（workflow.yml 放于工作区根目录）。
+        返回多仓工作区「树根」或单仓 clone 根目录。
+        executor 默认在此目录下查找 .riscv/workflow.yml；repo 模式还可使用 workflow_dir_for_pr。
         """
+
+    def workflow_dir_for_pr(self, pr: PRInfo) -> str:
+        """
+        执行某个 PR 的构建时，在哪个目录下查找 .riscv/workflow.yml（并作为 shell 的 cwd）。
+        单仓模式：与 workflow_dir() 相同。
+        多仓模式：优先使用「该 PR 所在子仓库」内的 .riscv/workflow.yml（见 RepoWorkspace）。
+        """
+        return self.workflow_dir()

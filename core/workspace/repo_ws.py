@@ -155,6 +155,24 @@ class RepoWorkspace(WorkspaceBase):
     def workflow_dir(self) -> str:
         return self._workspace_dir
 
+    def workflow_dir_for_pr(self, pr: PRInfo) -> str:
+        """
+        多仓：优先使用「当前 PR 所在子仓库」内的 .riscv/workflow.yml
+        （与 GitHub 上该仓库各分支中的路径一致，例如 build/.riscv/workflow.yml）；
+        若子仓没有，再退回工作区根目录下的同路径（共用一份 workflow）。
+        """
+        root = self.workflow_dir()
+        wf_rel = os.path.join(".riscv", "workflow.yml")
+        sub = self._find_sub_path(pr.repo)
+        if sub:
+            sub_root = os.path.join(root, sub)
+            if os.path.isfile(os.path.join(sub_root, wf_rel)):
+                return sub_root
+        if os.path.isfile(os.path.join(root, wf_rel)):
+            return root
+        # 未找到文件时，让 executor 报错路径指向最可能的位置（通常应先补子仓内 workflow）
+        return os.path.join(root, sub) if sub else root
+
     # ── 公共工具方法 ──────────────────────────────────────────────────────
 
     def discover_watch_repos(self) -> list[str]:

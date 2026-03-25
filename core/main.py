@@ -147,13 +147,15 @@ def _worker_loop(
         start_time = time.monotonic()
         reporter.on_start(job)
 
+        pr_info = PRInfo(
+            repo=job.repo,
+            pr_number=job.pr_number,
+            head_sha=job.head_sha,
+        )
+
         # 1. 工作区同步
         try:
-            workspace.sync_for_pr(PRInfo(
-                repo=job.repo,
-                pr_number=job.pr_number,
-                head_sha=job.head_sha,
-            ))
+            workspace.sync_for_pr(pr_info)
         except (OSError, RuntimeError) as e:
             err_msg = str(e)
             print(
@@ -177,7 +179,7 @@ def _worker_loop(
             reporter.on_step_progress(job, desc)
 
         conclusion, log_text = executor.run_workflow(
-            workspace.workflow_dir(),
+            workspace.workflow_dir_for_pr(pr_info),
             cfg.step_timeout,
             _progress_cb,
         )
