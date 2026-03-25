@@ -8,6 +8,7 @@ import requests
 
 API_BASE = "https://api.github.com"
 STATUS_CONTEXT = "RISC-V Native CI"
+STATUS_DESC_MAX = 140
 
 
 def _github_headers() -> dict[str, str]:
@@ -87,13 +88,31 @@ def list_open_prs() -> list[dict[str, object]]:
     return prs
 
 
+def _clip_description(text: str) -> str:
+    if len(text) <= STATUS_DESC_MAX:
+        return text
+    return text[: STATUS_DESC_MAX - 1] + "…"
+
+
 def create_commit_status(sha: str) -> None:
     repo = os.environ["GITHUB_REPO"]
     url = f"{API_BASE}/repos/{repo}/statuses/{sha}"
     body = {
         "state": "pending",
         "context": STATUS_CONTEXT,
-        "description": "Build queued.",
+        "description": _clip_description("Build queued."),
+    }
+    r = requests.post(url, headers=_github_headers(), json=body, timeout=60)
+    r.raise_for_status()
+
+
+def update_commit_status_pending(sha: str, description: str) -> None:
+    repo = os.environ["GITHUB_REPO"]
+    url = f"{API_BASE}/repos/{repo}/statuses/{sha}"
+    body = {
+        "state": "pending",
+        "context": STATUS_CONTEXT,
+        "description": _clip_description(description),
     }
     r = requests.post(url, headers=_github_headers(), json=body, timeout=60)
     r.raise_for_status()
@@ -109,7 +128,7 @@ def update_commit_status(sha: str, conclusion: str) -> None:
     body = {
         "state": state,
         "context": STATUS_CONTEXT,
-        "description": desc,
+        "description": _clip_description(desc),
     }
     r = requests.post(url, headers=_github_headers(), json=body, timeout=60)
     r.raise_for_status()

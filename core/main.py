@@ -114,9 +114,23 @@ def _tick() -> None:
             print(f"更新 Commit Status 失败: {ex}", file=sys.stderr)
         return
 
+    def _progress_cb(event: str, idx: int, total: int, step_name: str) -> None:
+        if event == "start":
+            desc = f"Running {idx}/{total}: {step_name}"
+        elif event == "done":
+            desc = f"Finished {idx}/{total}: {step_name}"
+        else:
+            desc = f"Step {idx}/{total}: {step_name}"
+        print(f"[Info] {desc}", flush=True)
+        try:
+            github_api.update_commit_status_pending(sha, desc)
+        except requests.RequestException as e:
+            print(f"更新 Commit Status 失败: {e}", file=sys.stderr)
+
     conclusion, _log_text = executor.run_workflow(
         cfg.workspace_dir,
         cfg.step_timeout,
+        _progress_cb,
     )
     try:
         github_api.update_commit_status(sha, conclusion)

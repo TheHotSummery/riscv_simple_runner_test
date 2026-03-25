@@ -6,6 +6,10 @@ import os
 import signal
 import subprocess
 import yaml
+from typing import Callable, Optional
+import threading
+import queue
+import time
 
 WORKFLOW_REL = os.path.join(".github", "workflows", "riscv-ci.yml")
 
@@ -48,23 +52,70 @@ def _run_step_shell(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        bufsize=1,
         preexec_fn=os.setsid,
     )
-    try:
-        stdout, stderr = proc.communicate(timeout=step_timeout_sec)
-        return proc.returncode, _merge_streams(stdout, stderr)
-    except subprocess.TimeoutExpired as e:
-        partial = _merge_streams(e.stdout, e.stderr)
-        _kill_process_tree(proc, signal.SIGTERM)
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    q: "queue.Queue[tuple[str, str | object]]" = queue.Queue()
+    sentinel = object()
+
+    def _reader(name: str, pipe) -> None:
+        try:
+            for line in iter(pipe.readline, ""):
+                q.put((name, line))
+        finally:
+            q.put((name, sentinel))
+
+    threads = [
+        threading.Thread(target=_reader, args=("stdout", proc.stdout), daemon=True),
+        threading.Thread(target=_reader, args=("stderr", proc.stderr), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+
+    logs: list[str] = []
+    done = 0
+    timed_out = False
+    deadline = time.monotonic() + max(0, step_timeout_sec)
+
+    while True:
+        if time.monotonic() > deadline:
+            timed_out = True
+            _kill_process_tree(proc, signal.SIGTERM)
+            break
+
+        try:
+            name, item = q.get(timeout=0.2)
+        except queue.Empty:
+            name, item = "", None
+
+        if item is sentinel:
+            done += 1
+        elif isinstance(item, str):
+            logs.append(item)
+            print(item, end="", flush=True)
+
+        if proc.poll() is not None and done >= 2 and q.empty():
+            break
+
+    if timed_out:
         try:
             proc.wait(timeout=15)
         except subprocess.TimeoutExpired:
             _kill_process_tree(proc, signal.SIGKILL)
             proc.wait()
-        return -1, partial
+        return -1, "".join(logs)
+
+    return proc.returncode, "".join(logs)
 
 
-def run_workflow(workspace_dir: str, step_timeout_sec: int) -> tuple[str, str]:
+def run_workflow(
+    workspace_dir: str,
+    step_timeout_sec: int,
+    progress_cb: Optional[Callable[[str, int, int, str], None]] = None,
+) -> tuple[str, str]:
     """
     读取 workspace 内 .github/workflows/riscv-ci.yml，顺序执行 steps。
     返回 (conclusion, total_log_text)，conclusion 为 success 或 failure。
@@ -90,6 +141,7 @@ def run_workflow(workspace_dir: str, step_timeout_sec: int) -> tuple[str, str]:
 
     logs: list[str] = []
 
+    total_steps = len(steps)
     for i, raw in enumerate(steps):
         if not isinstance(raw, dict):
             logs.append(f"\n=== Step {i + 1}: <invalid> ===\n步骤定义必须是映射。\n")
@@ -99,6 +151,8 @@ def run_workflow(workspace_dir: str, step_timeout_sec: int) -> tuple[str, str]:
         run_cmd = raw.get("run")
         step_name = name if isinstance(name, str) else str(name)
         logs.append(f"\n=== Step: {step_name} ===\n")
+        if progress_cb is not None:
+            progress_cb("start", i + 1, total_steps, step_name)
 
         if not isinstance(run_cmd, str) or not run_cmd.strip():
             logs.append("错误: 缺少有效的 run 字段。\n")
@@ -123,5 +177,8 @@ def run_workflow(workspace_dir: str, step_timeout_sec: int) -> tuple[str, str]:
         if code != 0:
             logs.append(f"\n步骤以退出码 {code} 结束，中止后续步骤。\n")
             return "failure", "".join(logs)
+
+        if progress_cb is not None:
+            progress_cb("done", i + 1, total_steps, step_name)
 
     return "success", "".join(logs)
