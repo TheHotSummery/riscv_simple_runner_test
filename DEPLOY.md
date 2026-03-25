@@ -4,14 +4,18 @@
 
 - Python 3.x、`git`、网络可访问 `api.github.com` 与 `github.com`
 - 已安装依赖：`pip install -r requirements.txt`（建议使用 venv）
+- **repo 多仓模式**另需安装 Google `repo` 工具，且 `WORKSPACE_MODE=repo`
 
 ## 配置 `.env`
 
 1. 在**项目根目录**（与 `core/` 同级）创建 `.env`，可参考 `.env.example`。
-2. 至少设置：`GITHUB_TOKEN`、`GITHUB_REPO`、`TARGET_BRANCH`；按需设置 `WORKSPACE_DIR`、`POLL_INTERVAL`、`STEP_TIMEOUT`。
-3. **注意**：systemd 的 `EnvironmentFile` 要求 `KEY=value` 一行一项，**不要**写 `export`。
+2. **单仓库（默认）**：`GITHUB_TOKEN`、`GITHUB_REPO`、`TARGET_BRANCH`；可选 `WORKSPACE_DIR`、`POLL_INTERVAL`、`STEP_TIMEOUT` 等。
+3. **repo 多仓模式**：设置 `WORKSPACE_MODE=repo`、`MANIFEST_REPO`、`TARGET_BRANCH`；`GITHUB_REPO` 可不填。`WATCH_REPOS` 留空时，首次 `repo sync` 后会从 manifest 解析出所有子仓库并轮询 PR。
+4. **`MANIFEST_GITHUB_ORG`（可选）**：manifest 里 `<remote fetch="../某组织">` 这类相对路径时，程序会推断 GitHub `owner` 以拼出 `owner/repo`。若推断不准，可显式设置，例如 `MANIFEST_GITHUB_ORG=spacemit-robotics`。
+5. **工作流文件**：Runner 读取工作区根目录下的 `.riscv/workflow.yml`（勿放在 `.github/workflows/`，以免被 GitHub Actions 误解析）。多仓工作区请在 `WORKSPACE_DIR` 根目录单独放置或部署时拷贝该文件。
+6. **注意**：systemd 的 `EnvironmentFile` 要求 `KEY=value` 一行一项，**不要**写 `export`。
 
-示例：
+### 单仓库示例
 
 ```ini
 GITHUB_TOKEN=ghp_xxxxxxxx
@@ -20,6 +24,21 @@ TARGET_BRANCH=main
 POLL_INTERVAL=15
 WORKSPACE_DIR=./workspace
 STEP_TIMEOUT=3600
+```
+
+### repo 多仓示例
+
+```ini
+GITHUB_TOKEN=ghp_xxxxxxxx
+TARGET_BRANCH=main
+WORKSPACE_MODE=repo
+MANIFEST_REPO=spacemit-robotics/manifest
+MANIFEST_BRANCH=main
+MANIFEST_FILE=default.xml
+MANIFEST_GITHUB_ORG=spacemit-robotics
+WORKSPACE_DIR=./workspace-repo
+POLL_INTERVAL=15
+# 只测少数子仓时可写 WATCH_REPOS=spacemit-robotics/build,spacemit-robotics/scripts
 ```
 
 ## 安装 systemd 服务

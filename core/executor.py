@@ -11,7 +11,7 @@ import threading
 import queue
 import time
 
-WORKFLOW_REL = os.path.join(".github", "workflows", "riscv-ci.yml")
+WORKFLOW_REL = os.path.join(".riscv", "workflow.yml")
 
 
 def _merge_streams(stdout: str | None, stderr: str | None) -> str:

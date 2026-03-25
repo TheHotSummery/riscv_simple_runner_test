@@ -8,44 +8,133 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class Config:
+    # ── 必填 ────────────────────────────────────────────────────────────────
     github_token: str
-    github_repo: str
     target_branch: str
-    poll_interval: int
+
+    # ── 工作区模式 ──────────────────────────────────────────────────────────
+    workspace_mode: str   # "git" | "repo"
     workspace_dir: str
-    step_timeout: int
+
+    # git 模式专有（workspace_mode="git" 时必填）
+    github_repo: str
+
+    # repo 模式专有（workspace_mode="repo" 时必填）
+    manifest_repo: str
+    manifest_branch: str
+    manifest_file: str
+    # 可选：GitHub 组织/用户名；manifest 里 remote fetch 为相对路径时，
+    # 用于拼出 owner/repo（若留空则从 fetch 路径自动推断，如 ../spacemit-robotics）
+    manifest_github_org: str
+
+    # 监听的仓库列表：git 模式自动填充为 [github_repo]；
+    # repo 模式若留空则从 manifest 自动解析
+    watch_repos: tuple[str, ...]
+
+    # ── 调度 ────────────────────────────────────────────────────────────────
+    poll_interval: int         # 轮询间隔（秒）
+    step_timeout: int          # 单步超时（秒）
+    max_parallel_jobs: int     # 最大并行 job 数
+    cancel_superseded: bool    # 同 PR 新 push 时取消旧 pending job
+
+    # ── 上报 ────────────────────────────────────────────────────────────────
+    post_pr_comment: bool      # 是否在 PR 贴/编辑评论
+    log_dir: str               # 构建日志存储目录
+    runner_board: str          # 机器标识（显示在状态描述里）
+
+    # ── 安全 ────────────────────────────────────────────────────────────────
+    # 空元组 = 不限制，允许所有 PR 作者触发构建
+    allowed_authors: tuple[str, ...]
+
+
+def _parse_bool(val: str, default: bool) -> bool:
+    if not val:
+        return default
+    return val.lower() not in ("false", "0", "no", "off")
+
+
+def _parse_int(val: str, name: str) -> int:
+    try:
+        return int(val)
+    except ValueError as e:
+        raise RuntimeError(f"{name} 必须是整数") from e
 
 
 def load_config() -> Config:
-    required = ("GITHUB_TOKEN", "GITHUB_REPO", "TARGET_BRANCH")
+    required = ("GITHUB_TOKEN", "TARGET_BRANCH")
     missing = [k for k in required if not os.environ.get(k, "").strip()]
     if missing:
         raise RuntimeError(f"缺少必需环境变量: {', '.join(missing)}")
 
-    raw = os.environ.get("POLL_INTERVAL", "15").strip()
-    try:
-        poll = int(raw)
-    except ValueError as e:
-        raise RuntimeError("POLL_INTERVAL 必须是整数（秒）") from e
-    if poll <= 0:
-        raise RuntimeError("POLL_INTERVAL 必须为正整数")
+    workspace_mode = os.environ.get("WORKSPACE_MODE", "git").strip().lower()
+    if workspace_mode not in ("git", "repo"):
+        raise RuntimeError('WORKSPACE_MODE 只能是 "git" 或 "repo"')
+
+    github_repo = os.environ.get("GITHUB_REPO", "").strip()
+    if workspace_mode == "git" and not github_repo:
+        raise RuntimeError("WORKSPACE_MODE=git 时必须设置 GITHUB_REPO")
 
     ws = os.environ.get("WORKSPACE_DIR", "./workspace").strip() or "./workspace"
     workspace_dir = os.path.abspath(os.path.expanduser(ws))
 
-    raw_step = os.environ.get("STEP_TIMEOUT", "3600").strip()
-    try:
-        step_timeout = int(raw_step)
-    except ValueError as e:
-        raise RuntimeError("STEP_TIMEOUT 必须是整数（秒）") from e
+    poll = _parse_int(os.environ.get("POLL_INTERVAL", "15").strip() or "15", "POLL_INTERVAL")
+    if poll <= 0:
+        raise RuntimeError("POLL_INTERVAL 必须为正整数")
+
+    step_timeout = _parse_int(
+        os.environ.get("STEP_TIMEOUT", "3600").strip() or "3600", "STEP_TIMEOUT"
+    )
     if step_timeout <= 0:
         raise RuntimeError("STEP_TIMEOUT 必须为正整数")
 
+    max_parallel = _parse_int(
+        os.environ.get("MAX_PARALLEL_JOBS", "1").strip() or "1", "MAX_PARALLEL_JOBS"
+    )
+    if max_parallel <= 0:
+        raise RuntimeError("MAX_PARALLEL_JOBS 必须为正整数")
+
+    # watch_repos：git 模式自动设为 [github_repo]，repo 模式可手动指定或留空
+    raw_watch = os.environ.get("WATCH_REPOS", "").strip()
+    if raw_watch:
+        watch_repos: tuple[str, ...] = tuple(
+            r.strip() for r in raw_watch.split(",") if r.strip()
+        )
+    elif workspace_mode == "git" and github_repo:
+        watch_repos = (github_repo,)
+    else:
+        watch_repos = ()  # repo 模式下留空 → bootstrap 后自动解析
+
+    raw_authors = os.environ.get("ALLOWED_AUTHORS", "").strip()
+    allowed_authors: tuple[str, ...] = (
+        tuple(a.strip() for a in raw_authors.split(",") if a.strip())
+        if raw_authors
+        else ()
+    )
+
+    log_dir_raw = os.environ.get("LOG_DIR", "./logs").strip() or "./logs"
+    log_dir = os.path.abspath(os.path.expanduser(log_dir_raw))
+
     return Config(
         github_token=os.environ["GITHUB_TOKEN"].strip(),
-        github_repo=os.environ["GITHUB_REPO"].strip(),
         target_branch=os.environ["TARGET_BRANCH"].strip(),
-        poll_interval=poll,
+        workspace_mode=workspace_mode,
         workspace_dir=workspace_dir,
+        github_repo=github_repo,
+        manifest_repo=os.environ.get("MANIFEST_REPO", "").strip(),
+        manifest_branch=os.environ.get("MANIFEST_BRANCH", "main").strip() or "main",
+        manifest_file=os.environ.get("MANIFEST_FILE", "default.xml").strip() or "default.xml",
+        manifest_github_org=os.environ.get("MANIFEST_GITHUB_ORG", "").strip(),
+        watch_repos=watch_repos,
+        poll_interval=poll,
         step_timeout=step_timeout,
+        max_parallel_jobs=max_parallel,
+        cancel_superseded=_parse_bool(
+            os.environ.get("CANCEL_SUPERSEDED", "").strip(), default=True
+        ),
+        post_pr_comment=_parse_bool(
+            os.environ.get("POST_PR_COMMENT", "").strip(), default=True
+        ),
+        log_dir=log_dir,
+        runner_board=os.environ.get("RUNNER_BOARD", "deb1").strip() or "deb1",
+        allowed_authors=allowed_authors,
     )

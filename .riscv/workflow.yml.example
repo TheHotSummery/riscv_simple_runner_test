@@ -1,0 +1,36 @@
+# .riscv/workflow.yml — RISC-V CI 工作流配置示例
+#
+# ⚠️  此文件由 riscv-action-runner 读取，格式为自定义 YAML。
+#     请勿将此文件放入 .github/workflows/ 目录，否则 GitHub Actions 会尝试解析它并报错。
+#
+# 用法：将本文件复制为仓库根目录下的 .riscv/workflow.yml 并按需修改。
+# Runner 会依次执行 steps 列表中的每条 run 命令，任一步骤返回非零退出码即标记失败。
+
+steps:
+  - name: 检查环境
+    run: |
+      echo "工作区：$PWD"
+      git log --oneline -3
+      uname -a
+
+  - name: 安装依赖
+    run: |
+      sudo apt-get update -q
+      sudo apt-get install -y build-essential cmake ninja-build
+
+  - name: 清理上次产物
+    run: |
+      rm -rf build/
+
+  - name: 配置
+    run: |
+      cmake -B build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release
+
+  - name: 编译
+    run: |
+      ninja -C build -j$(nproc)
+
+  - name: 运行测试
+    run: |
+      ninja -C build test
