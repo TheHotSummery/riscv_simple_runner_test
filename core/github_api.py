@@ -118,11 +118,17 @@ def update_commit_status_pending(sha: str, description: str) -> None:
     r.raise_for_status()
 
 
-def update_commit_status(sha: str, conclusion: str) -> None:
+def update_commit_status(
+    sha: str,
+    conclusion: str,
+    description: str | None = None,
+) -> None:
     if conclusion not in ("success", "failure"):
         raise ValueError('conclusion 只能是 "success" 或 "failure"')
     state = "success" if conclusion == "success" else "failure"
     desc = "Build succeeded." if state == "success" else "Build failed."
+    if description:
+        desc = description
     repo = os.environ["GITHUB_REPO"]
     url = f"{API_BASE}/repos/{repo}/statuses/{sha}"
     body = {

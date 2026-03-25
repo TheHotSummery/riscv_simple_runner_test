@@ -17,6 +17,7 @@ from core import git_manager
 from core import github_api
 
 PR_STATE_FILE = ".pr_state.json"
+HEARTBEAT_INTERVAL_SEC = 60
 
 running = True
 
@@ -88,11 +89,11 @@ def _pick_next_pr() -> tuple[int, str] | None:
     return None
 
 
-def _tick() -> None:
+def _tick() -> bool:
     # PR 轮询模式：按创建时间升序，逐个处理未构建或更新过的 PR。
     next_pr = _pick_next_pr()
     if next_pr is None:
-        return
+        return False
     pr_number, sha = next_pr
     print(f"[Info] 处理 PR #{pr_number} head={sha}", flush=True)
 
@@ -112,7 +113,7 @@ def _tick() -> None:
             github_api.update_commit_status(sha, "failure")
         except requests.RequestException as ex:
             print(f"更新 Commit Status 失败: {ex}", file=sys.stderr)
-        return
+        return True
 
     def _progress_cb(event: str, idx: int, total: int, step_name: str) -> None:
         if event == "start":
@@ -133,13 +134,23 @@ def _tick() -> None:
         _progress_cb,
     )
     try:
-        github_api.update_commit_status(sha, conclusion)
+        board = os.environ.get("RUNNER_BOARD", "deb1").strip() or "deb1"
+        ws = cfg.workspace_dir
+        desc = (
+            f"Build succeeded on {board}, ws={ws}"
+            if conclusion == "success"
+            else f"Build failed on {board}, ws={ws}"
+        )
+        github_api.update_commit_status(sha, conclusion, desc)
     except requests.RequestException as e:
         print(f"更新 Commit Status 失败: {e}", file=sys.stderr)
+    print(f"[Info] PR #{pr_number} 完成：{conclusion}", flush=True)
 
     state = read_pr_state()
     state[pr_number] = sha
     write_pr_state(state)
+    print(f"[Info] 记录 PR 状态并等待下一轮轮询...", flush=True)
+    return True
 
 
 def main() -> None:
@@ -156,9 +167,10 @@ def main() -> None:
     )
 
     net_fail_streak = 0
+    last_heartbeat = time.monotonic()
     while running:
         try:
-            _tick()
+            processed = _tick()
             net_fail_streak = 0
         except requests.RequestException as e:
             net_fail_streak += 1
@@ -176,6 +188,15 @@ def main() -> None:
 
         if not running:
             break
+
+        if not processed and net_fail_streak == 0:
+            now = time.monotonic()
+            if now - last_heartbeat >= HEARTBEAT_INTERVAL_SEC:
+                print(
+                    f"[Info] 空闲中，等待下一轮轮询（interval={cfg.poll_interval}s）...",
+                    flush=True,
+                )
+                last_heartbeat = now
 
         if net_fail_streak > 0:
             _sleep_interruptible(delay)
