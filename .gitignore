@@ -6,4 +6,5 @@ __pycache__/
 *.pyo
 .last_sha
 .pr_state.json
-workspace/
+# 仅忽略仓库根目录下的构建工作区，勿写成 workspace/（会误伤 core/workspace/ 包）
+/workspace/

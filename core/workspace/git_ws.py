@@ -6,10 +6,12 @@ import os
 import subprocess
 from urllib.parse import quote
 
+from core.config import normalize_github_repo_slug
 from core.workspace import PRInfo, WorkspaceBase
 
 
 def _authed_clone_url(repo: str, token: str) -> str:
+    repo = normalize_github_repo_slug(repo)
     safe = quote(token, safe="")
     return f"https://x-access-token:{safe}@github.com/{repo}.git"
 

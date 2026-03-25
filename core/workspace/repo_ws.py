@@ -3,17 +3,53 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import threading
 import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
+from core.config import normalize_github_repo_slug
 from core.workspace import PRInfo, WorkspaceBase
 
 
 def _authed_url(repo: str, token: str) -> str:
+    repo = normalize_github_repo_slug(repo)
     safe = quote(token, safe="")
     return f"https://x-access-token:{safe}@github.com/{repo}.git"
+
+
+def _repo_binary() -> str:
+    """
+    返回 PATH 中的 repo 可执行文件路径。
+    未安装时抛出带安装提示的 RuntimeError（避免 obscure 的 FileNotFoundError）。
+    """
+    path = shutil.which("repo")
+    if path:
+        return path
+    raise RuntimeError(
+        "未找到 Google repo 工具（命令「repo」不在 PATH 中）。\n"
+        "WORKSPACE_MODE=repo 必须安装该工具后再启动 Runner。\n\n"
+        "安装示例：\n"
+        "  • Debian/Ubuntu：sudo apt install repo\n"
+        "  • 或官方脚本：\n"
+        "      mkdir -p ~/.bin\n"
+        "      curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/.bin/repo\n"
+        "      chmod +x ~/.bin/repo\n"
+        "      echo 'export PATH=\"$HOME/.bin:$PATH\"' >> ~/.bashrc\n"
+        "    然后重新登录或 source ~/.bashrc，执行 which repo 确认。\n"
+    )
+
+
+def _run_repo(args: list[str], *, cwd: str) -> subprocess.CompletedProcess[str]:
+    """以绝对路径调用 repo，避免 PATH 在 systemd 下与交互 shell 不一致。"""
+    bin_path = _repo_binary()
+    return subprocess.run(
+        [bin_path, *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+    )
 
 
 class RepoWorkspace(WorkspaceBase):
@@ -52,36 +88,59 @@ class RepoWorkspace(WorkspaceBase):
 
     # ── WorkspaceBase 实现 ────────────────────────────────────────────────
 
-    def bootstrap(self) -> None:
-        os.makedirs(self._workspace_dir, exist_ok=True)
+    def _repo_init(self) -> None:
+        """若尚无 .repo，则 repo init。"""
         repo_meta = os.path.join(self._workspace_dir, ".repo")
-
-        if not os.path.isdir(repo_meta):
-            manifest_url = _authed_url(self._manifest_repo, self._token)
-            r = subprocess.run(
-                [
-                    "repo", "init",
-                    "-u", manifest_url,
-                    "-b", self._manifest_branch,
-                    "-m", self._manifest_file,
-                ],
-                cwd=self._workspace_dir,
-                capture_output=True,
-                text=True,
-            )
-            if r.returncode != 0:
-                err = (r.stderr or r.stdout or "").strip()
-                raise RuntimeError(f"repo init 失败 (exit {r.returncode}): {err}")
-
-        r = subprocess.run(
-            ["repo", "sync", "-j4", "--no-clone-bundle", "--force-sync"],
+        if os.path.isdir(repo_meta):
+            return
+        manifest_url = _authed_url(self._manifest_repo, self._token)
+        r = _run_repo(
+            [
+                "init",
+                "-u", manifest_url,
+                "-b", self._manifest_branch,
+                "-m", self._manifest_file,
+            ],
             cwd=self._workspace_dir,
-            capture_output=True,
-            text=True,
         )
         if r.returncode != 0:
             err = (r.stderr or r.stdout or "").strip()
-            raise RuntimeError(f"repo sync 全量失败 (exit {r.returncode}): {err}")
+            raise RuntimeError(f"repo init 失败 (exit {r.returncode}): {err}")
+
+    def _repo_sync_full(self) -> subprocess.CompletedProcess[str]:
+        return _run_repo(
+            ["sync", "-j4", "--no-clone-bundle", "--force-sync"],
+            cwd=self._workspace_dir,
+        )
+
+    def bootstrap(self) -> None:
+        _repo_binary()  # 尽早给出清晰错误，而非 FileNotFoundError
+        os.makedirs(self._workspace_dir, exist_ok=True)
+        repo_meta = os.path.join(self._workspace_dir, ".repo")
+
+        self._repo_init()
+
+        r = self._repo_sync_full()
+        if r.returncode != 0:
+            err = (r.stderr or r.stdout or "").strip()
+            print(
+                "[Warn] repo sync 全量失败，常见原因是 .repo 或 .repo/manifests 曾被手动删除/损坏。"
+                " 将删除 .repo 后重新 init + sync（仅自动重试一次）…",
+                flush=True,
+            )
+            print(f"[Warn] 上次错误输出：\n{err}", flush=True)
+            shutil.rmtree(repo_meta, ignore_errors=True)
+            self._repo_path_map = {}
+            self._repo_init()
+            r = self._repo_sync_full()
+            if r.returncode != 0:
+                err2 = (r.stderr or r.stdout or "").strip()
+                raise RuntimeError(
+                    f"repo sync 全量仍失败 (exit {r.returncode}): {err2}\n\n"
+                    "请清空整个工作区目录后重试（会删除未纳入子仓库的本地文件，请先备份 .riscv/workflow.yml 等）：\n"
+                    f"  rm -rf {self._workspace_dir!r}\n"
+                    "然后重新启动 Runner。"
+                )
 
         self._repo_path_map = self._parse_manifest()
         print(
@@ -111,12 +170,11 @@ class RepoWorkspace(WorkspaceBase):
     # ── 私有方法 ──────────────────────────────────────────────────────────
 
     def _sync_for_pr_locked(self, pr: PRInfo) -> None:
+        _repo_binary()
         # 1. 增量同步所有子仓库（-c 只同步当前分支，速度快）
-        r = subprocess.run(
-            ["repo", "sync", "-j4", "--no-clone-bundle", "-c"],
+        r = _run_repo(
+            ["sync", "-j4", "--no-clone-bundle", "-c"],
             cwd=self._workspace_dir,
-            capture_output=True,
-            text=True,
         )
         if r.returncode != 0:
             err = (r.stderr or r.stdout or "").strip()

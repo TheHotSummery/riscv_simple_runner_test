@@ -47,6 +47,17 @@ class Config:
     allowed_authors: tuple[str, ...]
 
 
+def normalize_github_repo_slug(s: str) -> str:
+    """
+    将 GitHub 仓库名规范为 owner/repo 形式（不含 .git 后缀）。
+    若 .env 中误写 MANIFEST_REPO=org/foo.git，与代码里拼接的 .git 会叠成 foo.git.git 导致 clone 失败。
+    """
+    r = s.strip()
+    while len(r) > 4 and r.lower().endswith(".git"):
+        r = r[:-4].rstrip()
+    return r
+
+
 def _parse_bool(val: str, default: bool) -> bool:
     if not val:
         return default
@@ -70,7 +81,7 @@ def load_config() -> Config:
     if workspace_mode not in ("git", "repo"):
         raise RuntimeError('WORKSPACE_MODE 只能是 "git" 或 "repo"')
 
-    github_repo = os.environ.get("GITHUB_REPO", "").strip()
+    github_repo = normalize_github_repo_slug(os.environ.get("GITHUB_REPO", ""))
     if workspace_mode == "git" and not github_repo:
         raise RuntimeError("WORKSPACE_MODE=git 时必须设置 GITHUB_REPO")
 
@@ -96,8 +107,10 @@ def load_config() -> Config:
     # watch_repos：git 模式自动设为 [github_repo]，repo 模式可手动指定或留空
     raw_watch = os.environ.get("WATCH_REPOS", "").strip()
     if raw_watch:
-        watch_repos: tuple[str, ...] = tuple(
-            r.strip() for r in raw_watch.split(",") if r.strip()
+        watch_repos = tuple(
+            normalize_github_repo_slug(r)
+            for r in raw_watch.split(",")
+            if r.strip()
         )
     elif workspace_mode == "git" and github_repo:
         watch_repos = (github_repo,)
@@ -120,7 +133,9 @@ def load_config() -> Config:
         workspace_mode=workspace_mode,
         workspace_dir=workspace_dir,
         github_repo=github_repo,
-        manifest_repo=os.environ.get("MANIFEST_REPO", "").strip(),
+        manifest_repo=normalize_github_repo_slug(
+            os.environ.get("MANIFEST_REPO", "").strip()
+        ),
         manifest_branch=os.environ.get("MANIFEST_BRANCH", "main").strip() or "main",
         manifest_file=os.environ.get("MANIFEST_FILE", "default.xml").strip() or "default.xml",
         manifest_github_org=os.environ.get("MANIFEST_GITHUB_ORG", "").strip(),
