@@ -9,6 +9,7 @@ import sys
 import time
 
 import requests
+from dotenv import load_dotenv
 
 from core.config import load_config
 from core import executor
@@ -16,7 +17,6 @@ from core import git_manager
 from core import github_api
 
 PR_STATE_FILE = ".pr_state.json"
-REQUIRED_LABEL = "ready"
 
 running = True
 
@@ -78,19 +78,9 @@ def _pick_next_pr() -> tuple[int, str] | None:
         number = pr["number"]
         head_sha = pr["head_sha"]
         draft = pr.get("draft", False)
-        labels = pr.get("labels", [])
         if not isinstance(number, int) or not isinstance(head_sha, str):
             continue
         if bool(draft):
-            continue
-        if isinstance(labels, list):
-            has_ready = any(
-                isinstance(lab, str) and lab.lower() == REQUIRED_LABEL
-                for lab in labels
-            )
-        else:
-            has_ready = False
-        if not has_ready:
             continue
         last_sha = state.get(number)
         if last_sha != head_sha:
@@ -139,6 +129,7 @@ def _tick() -> None:
 
 
 def main() -> None:
+    load_dotenv()
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
 
