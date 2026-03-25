@@ -119,3 +119,20 @@ class JobQueue:
                 j for j in list(self._pending) + self._running
                 if j.status in ("pending", "running")
             ]
+
+    def has_active_job(self, repo: str, pr_number: int, head_sha: str) -> bool:
+        """
+        是否已有同一 repo + PR + head_sha 的任务在排队或执行中。
+        用于避免构建尚未完成、持久化 state 未更新时，轮询线程重复入队并刷屏「发现新任务」。
+        """
+        with self._lock:
+            for job in list(self._pending) + self._running:
+                if job.status not in ("pending", "running"):
+                    continue
+                if (
+                    job.repo == repo
+                    and job.pr_number == pr_number
+                    and job.head_sha == head_sha
+                ):
+                    return True
+        return False

@@ -21,6 +21,8 @@ class Poller:
     逐仓库调用 GitHub list_open_prs（带 ETag），比较本地 pr_state，
     将「新 PR」或「head SHA 已更新的 PR」投入 JobQueue。
 
+    若同一 (repo, PR, sha) 已在队列中 pending/running，则不再入队（避免构建期间重复「发现新任务」）。
+
     跳过规则（按优先级）：
       1. draft PR
       2. 标签含 "skip-ci" 或 "ci-skip"
@@ -82,7 +84,11 @@ class Poller:
                 # ── 与本地状态比较 ─────────────────────────────────────────
                 key = (repo, number)
                 if state.get(key) == head_sha:
-                    continue  # 未变化，跳过
+                    continue  # 已持久化记录，跳过
+
+                # 构建进行中时尚未写回 .pr_state.json，避免重复入队与重复 API 上报
+                if queue.has_active_job(repo, number, head_sha):
+                    continue
 
                 print(
                     f"[Info] 发现新任务：{repo} PR #{number} sha={head_sha[:8]}",
