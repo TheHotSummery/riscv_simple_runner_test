@@ -1,0 +1,15 @@
+[Unit]
+Description=RISC-V Lite Runner
+After=network.target
+
+[Service]
+Type=simple
+User=<YOUR_USER>
+WorkingDirectory=<PATH_TO_RISCV_LITE_RUNNER>
+EnvironmentFile=<PATH_TO_RISCV_LITE_RUNNER>/.env
+ExecStart=/usr/bin/python3 -m core.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
