@@ -178,8 +178,18 @@ def _worker_loop(
                 desc = f"Step {idx}/{total}: {step_name}"
             reporter.on_step_progress(job, desc)
 
+        # WORKFLOW_DIR 优先级最高：若配置了固定目录，直接用；否则按默认逻辑查找
+        if cfg.workflow_dir_override:
+            wf_dir = cfg.workflow_dir_override
+            print(
+                f"[Info] 使用指定工作流目录（WORKFLOW_DIR）：{wf_dir}",
+                flush=True,
+            )
+        else:
+            wf_dir = workspace.ensure_workflow_for_build(pr_info, cfg.target_branch)
+
         conclusion, log_text = executor.run_workflow(
-            workspace.ensure_workflow_for_build(pr_info, cfg.target_branch),
+            wf_dir,
             cfg.step_timeout,
             _progress_cb,
         )

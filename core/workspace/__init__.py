@@ -70,5 +70,6 @@ class WorkspaceBase(ABC):
         在 sync_for_pr 之后调用：确定最终用于执行 steps 的目录。
         若 PR 分支缺少 .riscv/workflow.yml，子类可从 origin/<target_branch> 单独检出该文件。
         默认实现：与 workflow_dir_for_pr 相同。
+        注意：WORKFLOW_DIR 覆盖在此层之上由 main.py 处理，不在这里。
         """
         return self.workflow_dir_for_pr(pr)

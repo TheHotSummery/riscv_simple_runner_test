@@ -42,6 +42,13 @@ class Config:
     log_dir: str               # 构建日志存储目录
     runner_board: str          # 机器标识（显示在状态描述里）
 
+    # ── 工作流文件目录（最高优先级）────────────────────────────────────────
+    # 留空 = 按默认逻辑查找（子仓库 → base 分支检出 → 工作区根）
+    # 设置后：所有 PR 一律用此目录下的 .riscv/workflow.yml，cwd 也为该目录
+    # 典型用途：指向 repo 工作区内的 build/ 目录（统一构建入口），
+    #           例如 WORKFLOW_DIR=./workspace/build
+    workflow_dir_override: str
+
     # ── 安全 ────────────────────────────────────────────────────────────────
     # 空元组 = 不限制，允许所有 PR 作者触发构建
     allowed_authors: tuple[str, ...]
@@ -127,6 +134,13 @@ def load_config() -> Config:
     log_dir_raw = os.environ.get("LOG_DIR", "./logs").strip() or "./logs"
     log_dir = os.path.abspath(os.path.expanduser(log_dir_raw))
 
+    wf_override_raw = os.environ.get("WORKFLOW_DIR", "").strip()
+    workflow_dir_override = (
+        os.path.abspath(os.path.expanduser(wf_override_raw))
+        if wf_override_raw
+        else ""
+    )
+
     return Config(
         github_token=os.environ["GITHUB_TOKEN"].strip(),
         target_branch=os.environ["TARGET_BRANCH"].strip(),
@@ -152,4 +166,5 @@ def load_config() -> Config:
         log_dir=log_dir,
         runner_board=os.environ.get("RUNNER_BOARD", "deb1").strip() or "deb1",
         allowed_authors=allowed_authors,
+        workflow_dir_override=workflow_dir_override,
     )

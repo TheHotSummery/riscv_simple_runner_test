@@ -79,6 +79,7 @@ python3 -m core.main
 | `WORKSPACE_DIR` | 工作区根目录，默认 `./workspace` |
 | `POLL_INTERVAL` | 轮询间隔（秒），默认 `15` |
 | `STEP_TIMEOUT` | 单步最大执行时间（秒），默认 `3600` |
+| `WORKFLOW_DIR` | **最高优先级**：指定一个目录，该目录下必须有 `.riscv/workflow.yml`；所有 PR 的构建都在此目录下执行（shell `cwd` = 该目录）。典型用途：repo 多仓统一构建，指向 `build/` 子仓目录（含 `envsetup.sh`、`build.sh`），例如 `WORKFLOW_DIR=./workspace/build`。留空 = 按自动查找逻辑 |
 | `SKIP_SUDO_STEPS` | 默认 `true`：若某步 `run` 中含 `sudo`，则**跳过执行**该步并写说明（避免无 TTY）；设为 `false` 可强制执行（需免密 sudo 等） |
 | `MANIFEST_*` / `WATCH_REPOS` / `MANIFEST_GITHUB_ORG` | 仅 `WORKSPACE_MODE=repo` 时使用，见 [DEPLOY.md](DEPLOY.md) |
 
@@ -88,10 +89,13 @@ python3 -m core.main
 
 ## 工作流文件放哪里
 
-| 模式 | 路径 |
-|------|------|
-| 单仓库 | 该仓库根目录：`.riscv/workflow.yml` |
-| repo 多仓 | **优先**：当前 PR 所在**子仓库**根目录下的 `.riscv/workflow.yml`；若 PR 分支没有该文件，会尝试从 **`origin/<TARGET_BRANCH>`** 只检出该文件；也可在工作区根放一份共用 |
+| 优先级 | 条件 | 说明 |
+|--------|------|------|
+| **1（最高）** | 设置了 `WORKFLOW_DIR` | 直接用该目录下的 `.riscv/workflow.yml`，所有 PR 共用，shell `cwd` = 该目录。**repo 统一构建推荐此方式**（指向 `./workspace/build`） |
+| 2 | 当前 PR 所在子仓库内有该文件 | PR 分支检出后，子仓根 `.riscv/workflow.yml` 存在 |
+| 3 | PR 分支没有，但 base 分支有 | 自动从 `origin/<TARGET_BRANCH>` 只检出该文件，代码仍为 PR head |
+| 4 | 工作区根目录有 | `WORKSPACE_DIR/.riscv/workflow.yml`（所有子仓共用） |
+| 5 | 都没有 | 报错 |
 
 文件名固定为 **`.riscv/workflow.yml`**（相对上述「工作目录」根）。
 
