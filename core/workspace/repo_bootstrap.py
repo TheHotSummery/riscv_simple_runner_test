@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import sys
 from subprocess import CompletedProcess
 from typing import Literal
@@ -137,9 +138,13 @@ def print_non_interactive_hint(stage: str) -> None:
 
 
 def prompt_choice(stage: str) -> Action:
-    """循环读取用户输入，直到得到合法选项。"""
+    """
+    循环读取用户输入，直到得到合法选项。
+    在等待输入期间恢复默认 SIGINT 行为，使 Ctrl+C 能中断 input()；
+    捕获到 KeyboardInterrupt 后返回 "abort"（并恢复原信号处理器）。
+    """
     if stage == "init":
-        print("\n请选择处理方式：", flush=True)
+        print("\n请选择处理方式：（Ctrl+C = 退出）", flush=True)
         print("  1) 仅重试 repo init（适合网络抖动或临时失败）", flush=True)
         print("  2) 删除 .repo 后重新 repo init（适合元数据损坏或不完整）", flush=True)
         print(
@@ -148,7 +153,7 @@ def prompt_choice(stage: str) -> Action:
         )
         print("  4) 退出 Runner", flush=True)
     else:
-        print("\n请选择处理方式：", flush=True)
+        print("\n请选择处理方式：（Ctrl+C = 退出）", flush=True)
         print("  1) 仅重试 repo sync（不删 .repo，适合网络抖动）", flush=True)
         print(
             "  2) 删除 .repo 后重新 repo init + repo sync（适合 manifest 元数据损坏）",
@@ -160,24 +165,41 @@ def prompt_choice(stage: str) -> Action:
         )
         print("  4) 退出 Runner", flush=True)
 
-    while True:
-        try:
-            raw = input("请输入选项编号 [1-4]: ").strip()
-        except EOFError:
-            print("[Info] 收到 EOF，按退出处理。", flush=True)
-            return "abort"
-        if not raw:
-            print("输入为空，请输入 1～4。", flush=True)
-            continue
-        if not re.fullmatch(r"[1-4]", raw):
-            print("无效输入：请只输入单个数字 1、2、3 或 4。", flush=True)
-            continue
-        return {
-            "1": "retry_same",
-            "2": "reinit",
-            "3": "wipe_workspace",
-            "4": "abort",
-        }[raw]
+    # 临时恢复默认 SIGINT，使 Ctrl+C 可中断 input()
+    try:
+        old_handler = signal.signal(signal.SIGINT, signal.default_int_handler)
+    except (OSError, ValueError):
+        old_handler = None  # 非主线程时无法设置，忽略
+
+    try:
+        while True:
+            try:
+                raw = input("请输入选项编号 [1-4]: ").strip()
+            except KeyboardInterrupt:
+                print("\n[Info] 收到 Ctrl+C，退出 Runner。", flush=True)
+                return "abort"
+            except EOFError:
+                print("[Info] 收到 EOF，按退出处理。", flush=True)
+                return "abort"
+            if not raw:
+                print("输入为空，请输入 1～4。", flush=True)
+                continue
+            if not re.fullmatch(r"[1-4]", raw):
+                print("无效输入：请只输入单个数字 1、2、3 或 4。", flush=True)
+                continue
+            return {
+                "1": "retry_same",
+                "2": "reinit",
+                "3": "wipe_workspace",
+                "4": "abort",
+            }[raw]
+    finally:
+        # 还原原来的信号处理器
+        if old_handler is not None:
+            try:
+                signal.signal(signal.SIGINT, old_handler)
+            except (OSError, ValueError):
+                pass
 
 
 def raise_noninteractive_failure(

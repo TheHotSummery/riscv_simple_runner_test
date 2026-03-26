@@ -51,13 +51,25 @@ def _repo_binary() -> str:
 
 
 def _run_repo(args: list[str], *, cwd: str) -> subprocess.CompletedProcess[str]:
-    """以绝对路径调用 repo，避免 PATH 在 systemd 下与交互 shell 不一致。"""
+    """
+    以绝对路径调用 repo，避免 PATH 在 systemd 下与交互 shell 不一致。
+    - stdin=DEVNULL：禁止 repo 内部的 git 子进程读终端（防止弹出 "Username for..." 提示）。
+    - GIT_TERMINAL_PROMPT=0：彻底告知 git 不要弹出凭据提示。
+    - GIT_ASKPASS=true：即使某些 git 版本忽略上面那条，也用空命令应答，返回空密码。
+    """
     bin_path = _repo_binary()
+    env = os.environ.copy()
+    env.update({
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "true",
+    })
     return subprocess.run(
         [bin_path, *args],
         cwd=cwd,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
         text=True,
+        env=env,
     )
 
 
