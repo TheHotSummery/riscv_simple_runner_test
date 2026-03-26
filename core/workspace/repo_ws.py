@@ -11,6 +11,14 @@ from urllib.parse import quote
 
 from core.config import normalize_github_repo_slug
 from core.workspace import PRInfo, WorkspaceBase
+from core.workspace.repo_bootstrap import (
+    classify_repo_error,
+    interactive_bootstrap_enabled,
+    merge_repo_output,
+    print_diagnostic,
+    prompt_choice,
+    raise_noninteractive_failure,
+)
 from core.workspace.workflow_fallback import try_materialize_workflow_from_target_branch
 
 
@@ -89,24 +97,40 @@ class RepoWorkspace(WorkspaceBase):
 
     # ── WorkspaceBase 实现 ────────────────────────────────────────────────
 
-    def _repo_init(self) -> None:
-        """若尚无 .repo，则 repo init。"""
-        repo_meta = os.path.join(self._workspace_dir, ".repo")
-        if os.path.isdir(repo_meta):
-            return
+    def _repo_init_run(self) -> subprocess.CompletedProcess[str]:
+        """
+        执行 repo init（调用方应保证尚不存在可用 .repo，或已删除后需重建）。
+        使用 --no-clone-bundle，与全量 sync 一致，减少 bundle 下载失败概率。
+        若系统上 repo 版本过旧不支持该参数，可设置环境变量 REPO_INIT_NO_CLONE_BUNDLE=0。
+        """
         manifest_url = _authed_url(self._manifest_repo, self._token)
-        r = _run_repo(
-            [
-                "init",
-                "-u", manifest_url,
-                "-b", self._manifest_branch,
-                "-m", self._manifest_file,
-            ],
-            cwd=self._workspace_dir,
-        )
-        if r.returncode != 0:
-            err = (r.stderr or r.stdout or "").strip()
-            raise RuntimeError(f"repo init 失败 (exit {r.returncode}): {err}")
+        init_args = [
+            "init",
+            "-u", manifest_url,
+            "-b", self._manifest_branch,
+            "-m", self._manifest_file,
+        ]
+        skip_nb = os.environ.get("REPO_INIT_NO_CLONE_BUNDLE", "1").strip().lower()
+        if skip_nb not in ("0", "false", "no", "off"):
+            init_args.insert(1, "--no-clone-bundle")
+        return _run_repo(init_args, cwd=self._workspace_dir)
+
+    def _wipe_workspace_contents(self) -> None:
+        """删除工作区目录下所有文件与子目录，不删除挂载点本身。"""
+        root = self._workspace_dir
+        if not os.path.isdir(root):
+            os.makedirs(root, exist_ok=True)
+            return
+        for name in os.listdir(root):
+            path = os.path.join(root, name)
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path, ignore_errors=True)
+                else:
+                    os.unlink(path)
+            except OSError:
+                pass
+        self._repo_path_map = {}
 
     def _repo_sync_full(self) -> subprocess.CompletedProcess[str]:
         return _run_repo(
@@ -119,29 +143,75 @@ class RepoWorkspace(WorkspaceBase):
         os.makedirs(self._workspace_dir, exist_ok=True)
         repo_meta = os.path.join(self._workspace_dir, ".repo")
 
-        self._repo_init()
+        while True:
+            # 1) init：无 .repo 时执行
+            if not os.path.isdir(repo_meta):
+                r_init = self._repo_init_run()
+                if r_init.returncode != 0:
+                    text = merge_repo_output(r_init)
+                    cat, expl = classify_repo_error(text)
+                    if not interactive_bootstrap_enabled():
+                        raise_noninteractive_failure(
+                            stage="init",
+                            workspace_dir=self._workspace_dir,
+                            r=r_init,
+                            category=cat,
+                            explanation_zh=expl,
+                        )
+                    print_diagnostic(
+                        stage="init",
+                        workspace_dir=self._workspace_dir,
+                        r=r_init,
+                        category=cat,
+                        explanation_zh=expl,
+                    )
+                    act = prompt_choice("init")
+                    if act == "abort":
+                        raise RuntimeError("用户选择退出（repo init 失败）。")
+                    if act == "retry_same":
+                        continue
+                    if act == "reinit":
+                        shutil.rmtree(repo_meta, ignore_errors=True)
+                        self._repo_path_map = {}
+                        continue
+                    if act == "wipe_workspace":
+                        self._wipe_workspace_contents()
+                        continue
 
-        r = self._repo_sync_full()
-        if r.returncode != 0:
-            err = (r.stderr or r.stdout or "").strip()
-            print(
-                "[Warn] repo sync 全量失败，常见原因是 .repo 或 .repo/manifests 曾被手动删除/损坏。"
-                " 将删除 .repo 后重新 init + sync（仅自动重试一次）…",
-                flush=True,
-            )
-            print(f"[Warn] 上次错误输出：\n{err}", flush=True)
-            shutil.rmtree(repo_meta, ignore_errors=True)
-            self._repo_path_map = {}
-            self._repo_init()
+            # 2) 全量 sync
             r = self._repo_sync_full()
-            if r.returncode != 0:
-                err2 = (r.stderr or r.stdout or "").strip()
-                raise RuntimeError(
-                    f"repo sync 全量仍失败 (exit {r.returncode}): {err2}\n\n"
-                    "请清空整个工作区目录后重试（会删除未纳入子仓库的本地文件，请先备份 .riscv/workflow.yml 等）：\n"
-                    f"  rm -rf {self._workspace_dir!r}\n"
-                    "然后重新启动 Runner。"
+            if r.returncode == 0:
+                break
+
+            text = merge_repo_output(r)
+            cat, expl = classify_repo_error(text)
+            if not interactive_bootstrap_enabled():
+                raise_noninteractive_failure(
+                    stage="sync",
+                    workspace_dir=self._workspace_dir,
+                    r=r,
+                    category=cat,
+                    explanation_zh=expl,
                 )
+            print_diagnostic(
+                stage="sync",
+                workspace_dir=self._workspace_dir,
+                r=r,
+                category=cat,
+                explanation_zh=expl,
+            )
+            act = prompt_choice("sync")
+            if act == "abort":
+                raise RuntimeError("用户选择退出（repo sync 全量失败）。")
+            if act == "retry_same":
+                continue
+            if act == "reinit":
+                shutil.rmtree(repo_meta, ignore_errors=True)
+                self._repo_path_map = {}
+                continue
+            if act == "wipe_workspace":
+                self._wipe_workspace_contents()
+                continue
 
         self._repo_path_map = self._parse_manifest()
         print(

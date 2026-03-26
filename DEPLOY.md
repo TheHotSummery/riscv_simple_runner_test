@@ -91,9 +91,23 @@ bianbu ALL=(ALL) NOPASSWD: /usr/bin/apt-get, /usr/bin/apt
 
 程序默认还会对工作流里 **含 `sudo` 的步骤** 做检测：若环境变量 **`SKIP_SUDO_STEPS`** 为真（默认），则**不执行**该步 shell，仅在日志中说明原因（避免无 TTY 时 sudo 直接失败）。需要强制执行时请设 `SKIP_SUDO_STEPS=false` 并自行保证免密 sudo 等。
 
-## repo 模式：工作区损坏时
+## repo 模式：init / sync 失败时（交互菜单）
 
-若曾手动删除过 `WORKSPACE_DIR` 下某些 `.git`、`.repo/manifests` 等，`repo sync` 可能报 `manifest.xml` 不存在、`unparseable HEAD` 等。Runner 会在**首次** `repo sync` 失败时自动删除 `.repo` 并重新 `repo init` + `repo sync` 一次。若仍失败，请**整目录清空**后重启（先备份工作区根目录的 `.riscv/workflow.yml` 等自建文件）：
+首次 `repo init` 或全量 `repo sync` 失败时，Runner 会：
+
+1. **打印诊断**：退出码、错误归类（如网络 / 未 init / 元数据损坏）、合并后的完整 stdout+stderr。
+2. **交互终端**：在**前台、有 TTY** 时提示输入 **1～4** 选择处理方式（仅重试、删 `.repo` 重来、清空整个工作区内容、退出）。
+3. **非交互**（systemd、`journalctl` 无 TTY，或显式关闭交互）：打印同样诊断与**可选手动命令**，然后以 `RuntimeError` 退出，避免无人值守时误删工作区。
+
+关闭交互（适合服务单元）：
+
+```ini
+REPO_BOOTSTRAP_NON_INTERACTIVE=1
+```
+
+可选：`REPO_INIT_NO_CLONE_BUNDLE=0` 若你本机 `repo init` 不支持 `--no-clone-bundle`（默认会带上该参数，与全量 sync 一致）。
+
+若曾手动删除过 `WORKSPACE_DIR` 下某些 `.git`、`.repo/manifests` 等，`repo sync` 可能报 `manifest.xml` 不存在、`unparseable HEAD`、`sync requires repo to be installed` 等。按菜单选「删 `.repo` 重来」或「清空工作区」即可；清空前请备份工作区根目录自建的 `.riscv/workflow.yml` 等：
 
 ```bash
 rm -rf /path/to/WORKSPACE_DIR
