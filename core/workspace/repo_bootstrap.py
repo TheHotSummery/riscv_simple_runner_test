@@ -28,6 +28,21 @@ def classify_repo_error(text: str) -> tuple[str, str]:
     """
     t = (text or "").lower()
 
+    # repo 脚本首次会在工作区 .repo 下克隆「git-repo」工具本身，默认从 gerrit 拉取，国内常超时/连不上
+    if (
+        "gerrit.googlesource.com" in t
+        or "downloading repo source" in t
+        or "cloning the git-repo repository failed" in t
+        or "fatal: double check your --repo-rev" in t
+    ):
+        return (
+            "repo_tool_clone_failed",
+            "repo init 时会克隆 git-repo 工具源码（默认源 gerrit.googlesource.com），"
+            "若无法访问该域名会失败。请在 .env 中设置 REPO_REPO_URL 指向可访问镜像，"
+            "并重新 init。示例：REPO_REPO_URL=https://mirrors.tuna.tsinghua.edu.cn/git/git-repo "
+            "或 REPO_REPO_URL=https://github.com/git-repo/git-repo；也可配置 HTTPS 代理后再试。",
+        )
+
     if (
         "requires repo to be installed" in t
         or 'use "repo init"' in t

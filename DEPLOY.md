@@ -7,6 +7,10 @@
 - **repo 多仓模式**另需安装 Google `repo` 工具（`WORKSPACE_MODE=repo` 时**必须**在 PATH 中能找到 `repo` 命令；未安装会报错并提示安装方式）：
   - Debian/Ubuntu：`sudo apt install repo`
   - 或下载脚本：`mkdir -p ~/.bin && curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/.bin/repo && chmod +x ~/.bin/repo`，并把 `~/.bin` 加入 `PATH`（systemd 服务需在 `Environment=PATH=...` 中包含该路径）
+- **`repo init` 与 gerrit（国内常见）**：首次在工作区执行 `repo init` 时，`repo` 会在 `.repo` 下克隆 **git-repo 工具源码**，默认从 **gerrit.googlesource.com** 拉取。若日志出现 `Could not connect to gerrit.googlesource.com` 或 `cloning the git-repo repository failed`，请在 `.env` 中设置 **镜像**，由 Runner 传给 `repo init --repo-url`：
+  - `REPO_REPO_URL=https://mirrors.tuna.tsinghua.edu.cn/git/git-repo`（清华镜像，以你环境可访问为准）
+  - 或 `REPO_REPO_URL=https://github.com/git-repo/git-repo`
+  - 也可使用 HTTP/HTTPS **代理**后再 init，不设 `REPO_REPO_URL` 亦可。
 
 ## 配置 `.env`
 

@@ -82,6 +82,7 @@ python3 -m core.main
 | `WORKFLOW_DIR` | **最高优先级**：指定一个目录，该目录下必须有 `.riscv/workflow.yml`；所有 PR 的构建都在此目录下执行（shell `cwd` = 该目录）。典型用途：repo 多仓统一构建，指向 `build/` 子仓目录（含 `envsetup.sh`、`build.sh`），例如 `WORKFLOW_DIR=./workspace/build`。留空 = 按自动查找逻辑 |
 | `SKIP_SUDO_STEPS` | 默认 `true`：若某步 `run` 中含 `sudo`，则**跳过执行**该步并写说明（避免无 TTY）；设为 `false` 可强制执行（需免密 sudo 等） |
 | `MANIFEST_*` / `WATCH_REPOS` / `MANIFEST_GITHUB_ORG` | 仅 `WORKSPACE_MODE=repo` 时使用，见 [DEPLOY.md](DEPLOY.md) |
+| `REPO_REPO_URL` | 仅 repo 模式：`repo init` 克隆 **git-repo** 工具时的地址（默认连 gerrit，国内常需改为清华/GitHub 镜像），见 [DEPLOY.md](DEPLOY.md) |
 
 完整列表以 `.env.example` 与 [DEPLOY.md](DEPLOY.md) 为准。
 

@@ -104,15 +104,21 @@ class RepoWorkspace(WorkspaceBase):
         若系统上 repo 版本过旧不支持该参数，可设置环境变量 REPO_INIT_NO_CLONE_BUNDLE=0。
         """
         manifest_url = _authed_url(self._manifest_repo, self._token)
-        init_args = [
-            "init",
-            "-u", manifest_url,
-            "-b", self._manifest_branch,
-            "-m", self._manifest_file,
-        ]
+        init_args: list[str] = ["init"]
         skip_nb = os.environ.get("REPO_INIT_NO_CLONE_BUNDLE", "1").strip().lower()
         if skip_nb not in ("0", "false", "no", "off"):
-            init_args.insert(1, "--no-clone-bundle")
+            init_args.append("--no-clone-bundle")
+        # 克隆 git-repo 工具本身的 URL（默认 gerrit，国内常不可用）；见 REPO_REPO_URL
+        repo_tool_url = os.environ.get("REPO_REPO_URL", "").strip()
+        if repo_tool_url:
+            init_args.extend(["--repo-url", repo_tool_url])
+        init_args.extend(
+            [
+                "-u", manifest_url,
+                "-b", self._manifest_branch,
+                "-m", self._manifest_file,
+            ]
+        )
         return _run_repo(init_args, cwd=self._workspace_dir)
 
     def _wipe_workspace_contents(self) -> None:
